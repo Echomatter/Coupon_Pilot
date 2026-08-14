@@ -26,15 +26,21 @@ Coupon Pilot currently includes:
 - a site health check before automation runs;
 - an adapter registry for adding more retailers without rebuilding the UI.
 
-## Install
+## Quick install
 
-1. Install Tampermonkey (or a compatible userscript manager).
-2. Open [`coupon-pilot.user.js`](./coupon-pilot.user.js) in GitHub.
-3. Use the **Raw** view and install it with Tampermonkey. If your browser/userscript manager does not hand off a private-repository Raw file automatically, create a new userscript in Tampermonkey and paste the file contents there.
-4. Open a supported retailer coupon page.
-5. Use **Dry Run** first after installation or after a retailer redesign.
+Because this repository is private, **manual Tampermonkey installation is the reliable path**:
 
-For Harris Teeter, Coupon Pilot activates on coupon pages under `harristeeter.com`.
+1. Install Tampermonkey.
+2. Open [`coupon-pilot.user.js`](./coupon-pilot.user.js).
+3. Copy the complete script.
+4. In Tampermonkey, choose **Create a new script**.
+5. Replace the template with Coupon Pilot and save it.
+6. Reload the Harris Teeter digital-coupons page.
+7. Leave **Dry run** enabled and choose **Run dry preview** before the first live run.
+
+See **[docs/INSTALL.md](./docs/INSTALL.md)** for browser setup, first-run instructions, updating, rule precedence, and troubleshooting.
+
+Coupon Pilot is installed as one userscript; there is no build step or backend.
 
 ## How the rules work
 
@@ -64,6 +70,10 @@ The engine prefers observable browser actions:
 `discover -> classify -> act -> verify -> record`
 
 If a site changes enough that Coupon Pilot can no longer verify its actions, the run stops instead of continuing to click blindly.
+
+A fresh installation defaults to **Dry run = on**. The intended workflow after installation or a retailer redesign is:
+
+`dry preview -> inspect classifications -> live run`
 
 ## Add another retailer
 
