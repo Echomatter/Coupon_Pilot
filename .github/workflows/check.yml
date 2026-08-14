@@ -1,0 +1,14 @@
+name: Userscript check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check userscript syntax
+        run: node --check coupon-pilot.user.js
