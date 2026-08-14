@@ -30,4 +30,4 @@
       healthCheck(items = this.discoverItems()) { const available = items.filter(item => item.status === 'available').length; const clipped = items.filter(item => item.status === 'clipped').length; const ambiguous = items.filter(item => item.status === 'ambiguous').length; if (!items.length) return { level: 'warning', message: 'No coupon cards detected yet', found: 0, available: 0, clipped: 0, ambiguous: 0 }; if (!available && clipped && !ambiguous) return { level: 'done', message: 'No unclipped coupons currently detected', found: items.length, available, clipped, ambiguous }; if (ambiguous) return { level: available ? 'caution' : 'warning', message: available ? `${available} ready · ${ambiguous} skipped as ambiguous` : `${ambiguous} ambiguous coupon controls detected`, found: items.length, available, clipped, ambiguous }; return { level: 'ready', message: `${available} ready to clip`, found: items.length, available, clipped, ambiguous }; }
     };
   });
-})(globalThis);
+})(window);

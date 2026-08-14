@@ -25,6 +25,8 @@ assert.match(shell, /if \(actionCount\(\) >= maxActions\) break;/, 'max actions 
 assert.match(shell, /const dryRun = Boolean\(state\.automation\.dryRun\)/, 'run mode must be fixed when a run starts');
 assert.match(shell, /markPreview\(item\.element, 'blocked'/, 'blocked preview marks must be tracked for cleanup');
 assert.ok(!shell.includes('row.innerHTML ='), 'retailer-controlled coupon text must not be interpolated into HTML');
+assert.ok(!built.includes('globalThis'), 'installable userscript must pass Tampermonkey browser linting');
+assert.match(shell, /tab\.onclick = selectRuleTab/, 'tab handlers must not declare functions inside a loop');
 assert.match(harrisTeeter, /apiVersion:\s*1/, 'adapter API version missing');
 assert.match(harrisTeeter, /async verify\(/, 'adapter must verify actions');
 assert.match(harrisTeeter, /healthCheck\(/, 'adapter must expose health check');

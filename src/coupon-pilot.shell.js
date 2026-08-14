@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coupon Pilot
 // @namespace    https://echomatter.local
-// @version      0.3.1
+// @version      0.3.2
 // @description  Modular coupon-clipping assistant with rules, dry-run, verification, and retailer adapters.
 // @match        https://www.harristeeter.com/*
 // @run-at       document-idle
@@ -13,7 +13,7 @@
 (async function CouponPilot() {
   'use strict';
 
-  const APP_VERSION = '0.3.1';
+  const APP_VERSION = '0.3.2';
   const MODULE_API_VERSION = 1;
   const STORAGE_KEY = 'couponPilot:state';
   const PREVIEW_ATTR = 'data-coupon-pilot-preview';
@@ -114,7 +114,7 @@
   }
 
   const moduleApi = Object.freeze({ apiVersion: MODULE_API_VERSION, normalize, textOf, visible, hash, waitFor, safeCouponIdentity });
-  for (const factory of globalThis.CouponPilotModuleFactories || []) registerModule(factory(moduleApi));
+  for (const factory of window.CouponPilotModuleFactories || []) registerModule(factory(moduleApi));
 
   function getActiveModule() {
     return modules.find(module => {
@@ -253,7 +253,8 @@
 
   $('.search').oninput = renderCoupons;
   $('.addTerm').onclick = async () => { if (!activeModule) return; const input = $('.termInput'); const term = normalize(input.value).toLowerCase(); if (!term) return; const moduleState = getModuleState(activeModule); const key = activeRuleTab === 'always' ? 'alwaysTerms' : 'blockedTerms'; if (!moduleState[key].includes(term)) moduleState[key].push(term); input.value = ''; await persist(); refreshData(); };
-  for (const tab of $$('.tab')) tab.onclick = () => { activeRuleTab = tab.dataset.tab; for (const candidate of $$('.tab')) candidate.classList.toggle('active', candidate === tab); renderTerms(); };
+  function selectRuleTab(event) { const selectedTab = event.currentTarget; activeRuleTab = selectedTab.dataset.tab; for (const candidate of $$('.tab')) candidate.classList.toggle('active', candidate === selectedTab); renderTerms(); }
+  for (const tab of $$('.tab')) tab.onclick = selectRuleTab;
   $('.dryRun').onchange = async event => { if (running) return render(); state.automation.dryRun = event.target.checked; await persist(); if (!event.target.checked) clearPreviewMarks(); render(); };
   $('.delay').onchange = async event => { state.automation.clickDelay = clampNumber(event.target.value, DEFAULT_STATE.automation.clickDelay, 250, 5000); await persist(); render(); };
   $('.maxActions').onchange = async event => { state.automation.maxActions = Math.floor(clampNumber(event.target.value, DEFAULT_STATE.automation.maxActions, 1, 1000)); await persist(); render(); };
