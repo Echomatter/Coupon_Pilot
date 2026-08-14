@@ -10,7 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check userscript syntax
-        run: node --check coupon-pilot.user.js
-      - name: Check userscript safety contract
+      - name: Rebuild distributable
+        run: node scripts/build.mjs
+      - name: Check syntax
+        run: |
+          node --check src/coupon-pilot.shell.js
+          node --check modules/harris-teeter.js
+          node --check coupon-pilot.user.js
+      - name: Check safety contract
         run: node tests/static-checks.mjs

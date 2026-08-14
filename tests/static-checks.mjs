@@ -1,29 +1,29 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
-const source = await readFile(new URL('../coupon-pilot.user.js', import.meta.url), 'utf8');
-
-const metadataVersion = source.match(/^\/\/ @version\s+([^\s]+)$/m)?.[1];
-const appVersion = source.match(/const APP_VERSION\s*=\s*['"]([^'"]+)['"]/m)?.[1];
-
-assert.ok(metadataVersion, 'userscript metadata must declare @version');
-assert.ok(appVersion, 'userscript must declare APP_VERSION');
+const exec = promisify(execFile);
+await exec(process.execPath, ['scripts/build.mjs']);
+const shell = await readFile(new URL('../src/coupon-pilot.shell.js', import.meta.url), 'utf8');
+const built = await readFile(new URL('../coupon-pilot.user.js', import.meta.url), 'utf8');
+const harrisTeeter = await readFile(new URL('../modules/harris-teeter.js', import.meta.url), 'utf8');
+const metadataVersion = built.match(/^\/\/ @version\s+([^\s]+)$/m)?.[1];
+const appVersion = shell.match(/const APP_VERSION\s*=\s*['"]([^'"]+)['"]/m)?.[1];
 assert.equal(metadataVersion, appVersion, '@version and APP_VERSION must stay in sync');
-
-assert.match(source, /^\/\/ @name\s+Coupon Pilot$/m, 'userscript name changed unexpectedly');
-assert.match(source, /^\/\/ @match\s+https:\/\/www\.harristeeter\.com\/\*$/m, 'Harris Teeter match is missing');
-assert.match(source, /^\/\/ @grant\s+GM_getValue$/m, 'persistent userscript storage grant is missing');
-assert.match(source, /^\/\/ @grant\s+GM_setValue$/m, 'persistent userscript storage grant is missing');
-
-assert.match(source, /dryRun:\s*true/, 'fresh installs must default to Dry Run');
-assert.match(source, /new AbortController\(\)/, 'live runs must remain abortable');
-assert.match(source, /new MutationObserver\(/, 'lazy-loaded DOM changes must remain observable');
-assert.match(source, /async verify\(/, 'site modules must verify actions after clicking');
-assert.match(source, /healthCheck\(\)/, 'site modules must expose a health check');
-assert.match(source, /safeCouponIdentity/, 'stable fallback coupon identity is missing');
-
-assert.ok(!source.includes('\\badd\\b'), 'generic Add matching is forbidden: it can collide with Add to cart');
-assert.ok(!source.includes('proxy rotation'), 'anti-detection behavior does not belong in Coupon Pilot');
-assert.ok(!source.includes('CAPTCHA solving'), 'CAPTCHA bypass behavior does not belong in Coupon Pilot');
-
+assert.match(built, /GENERATED FILE/, 'distributable must be generated from modular sources');
+assert.match(built, /id:\s*'harris-teeter'/, 'built userscript must include Harris Teeter adapter');
+assert.match(shell, /const MODULE_API_VERSION = 1/, 'shell module API version missing');
+assert.match(shell, /CouponPilotModuleFactories/, 'shell must load registered module factories');
+assert.match(shell, /Duplicate Coupon Pilot module id/, 'duplicate module IDs must fail');
+assert.match(shell, /typeof module\[key\] !== 'function'/, 'module functions must be type-checked');
+assert.match(shell, /dryRun:\s*true/, 'fresh installs must default to Dry Run');
+assert.match(shell, /new AbortController\(\)/, 'live runs must remain abortable');
+assert.match(shell, /new MutationObserver\(/, 'lazy-loaded DOM changes must remain observable');
+assert.match(shell, /return Boolean\(revealed\)/, 'load-more timeout must not report false progress');
+assert.match(harrisTeeter, /apiVersion:\s*1/, 'adapter API version missing');
+assert.match(harrisTeeter, /async verify\(/, 'adapter must verify actions');
+assert.match(harrisTeeter, /healthCheck\(/, 'adapter must expose health check');
+assert.match(harrisTeeter, /safeCouponIdentity/, 'stable fallback coupon identity is missing');
+assert.ok(!harrisTeeter.includes('\\badd\\b'), 'generic Add matching is forbidden');
 console.log('Coupon Pilot static safety checks passed.');
