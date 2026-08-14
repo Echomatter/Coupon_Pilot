@@ -6,9 +6,11 @@ on:
   pull_request:
 
 jobs:
-  syntax:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check userscript syntax
         run: node --check coupon-pilot.user.js
+      - name: Check userscript safety contract
+        run: node tests/static-checks.mjs
