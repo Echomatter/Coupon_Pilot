@@ -39,6 +39,7 @@ Edit the shell or retailer modules, then rebuild:
 
 ```bash
 node scripts/build.mjs
+node scripts/build.mjs --check
 node tests/static-checks.mjs
 node --check coupon-pilot.user.js
 ```

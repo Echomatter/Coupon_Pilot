@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coupon Pilot
 // @namespace    https://echomatter.local
-// @version      0.3.0
+// @version      0.3.1
 // @description  Modular coupon-clipping assistant with rules, dry-run, verification, and retailer adapters.
 // @match        https://www.harristeeter.com/*
 // @run-at       document-idle
@@ -13,7 +13,7 @@
 (async function CouponPilot() {
   'use strict';
 
-  const APP_VERSION = '0.3.0';
+  const APP_VERSION = '0.3.1';
   const MODULE_API_VERSION = 1;
   const STORAGE_KEY = 'couponPilot:state';
   const PREVIEW_ATTR = 'data-coupon-pilot-preview';
@@ -73,11 +73,25 @@
   function safeCouponIdentity(text) {
     return normalize(text).toLowerCase().replace(/\b(clipped|unclip|remove coupon|clip coupon|clip)\b/g, '').replace(/\s+/g, ' ').trim();
   }
+  function clampNumber(value, fallback, min, max) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+  }
   function migrateState(stored) {
+    const storedAutomation = stored?.automation && typeof stored.automation === 'object' && !Array.isArray(stored.automation) ? stored.automation : {};
+    const storedModules = stored?.modules && typeof stored.modules === 'object' && !Array.isArray(stored.modules) ? stored.modules : {};
     return {
       minimized: Boolean(stored?.minimized),
-      automation: { ...DEFAULT_STATE.automation, ...(stored?.automation || {}) },
-      modules: stored?.modules && typeof stored.modules === 'object' ? stored.modules : {}
+      automation: {
+        clickDelay: clampNumber(storedAutomation.clickDelay, DEFAULT_STATE.automation.clickDelay, 250, 5000),
+        scrollDelay: clampNumber(storedAutomation.scrollDelay, DEFAULT_STATE.automation.scrollDelay, 100, 10000),
+        verifyTimeout: clampNumber(storedAutomation.verifyTimeout, DEFAULT_STATE.automation.verifyTimeout, 500, 30000),
+        maxActions: Math.floor(clampNumber(storedAutomation.maxActions, DEFAULT_STATE.automation.maxActions, 1, 1000)),
+        maxConsecutiveFailures: Math.floor(clampNumber(storedAutomation.maxConsecutiveFailures, DEFAULT_STATE.automation.maxConsecutiveFailures, 1, 50)),
+        retryAttempts: Math.floor(clampNumber(storedAutomation.retryAttempts, DEFAULT_STATE.automation.retryAttempts, 1, 10)),
+        dryRun: typeof storedAutomation.dryRun === 'boolean' ? storedAutomation.dryRun : DEFAULT_STATE.automation.dryRun
+      },
+      modules: storedModules
     };
   }
 
@@ -110,18 +124,20 @@
   }
 
   function getModuleState(module) {
-    state.modules[module.id] ||= { blockedTerms: [], alwaysTerms: [], enabledGroups: {}, lastRun: null };
+    if (!state.modules[module.id] || typeof state.modules[module.id] !== 'object' || Array.isArray(state.modules[module.id])) {
+      state.modules[module.id] = { blockedTerms: [], alwaysTerms: [], enabledGroups: {}, lastRun: null };
+    }
     const moduleState = state.modules[module.id];
-    moduleState.blockedTerms ||= [];
-    moduleState.alwaysTerms ||= [];
-    moduleState.enabledGroups ||= {};
+    if (!Array.isArray(moduleState.blockedTerms)) moduleState.blockedTerms = [];
+    if (!Array.isArray(moduleState.alwaysTerms)) moduleState.alwaysTerms = [];
+    if (!moduleState.enabledGroups || typeof moduleState.enabledGroups !== 'object' || Array.isArray(moduleState.enabledGroups)) moduleState.enabledGroups = {};
     for (const groupName of Object.keys(module.defaultBlockedGroups || {})) {
       if (!(groupName in moduleState.enabledGroups)) moduleState.enabledGroups[groupName] = false;
     }
     return moduleState;
   }
 
-  const uniqueTerms = terms => [...new Set(terms.map(term => normalize(term).toLowerCase()).filter(Boolean))];
+  const uniqueTerms = terms => [...new Set((Array.isArray(terms) ? terms : []).map(term => normalize(term).toLowerCase()).filter(Boolean))];
   function evaluateRules(item, module) {
     const haystack = item.text.toLowerCase();
     const moduleState = getModuleState(module);
@@ -150,6 +166,10 @@
   const app = $('.app');
 
   function logActivity(message, level = 'info') { activity.unshift({ message, level, at: new Date() }); activity.splice(20); renderActivity(); }
+  function markPreview(element, kind, color) {
+    element?.setAttribute(PREVIEW_ATTR, kind);
+    element?.style.setProperty('outline', `2px solid ${color}`);
+  }
   function clearPreviewMarks() { document.querySelectorAll(`[${PREVIEW_ATTR}]`).forEach(element => { element.removeAttribute(PREVIEW_ATTR); element.style.removeProperty('outline'); element.style.removeProperty('outline-offset'); }); }
   function refreshData() {
     activeModule = getActiveModule();
@@ -190,45 +210,57 @@
     const module = getActiveModule(); if (!module) return;
     const initialItems = module.discoverItems(); const initialHealth = module.healthCheck(initialItems);
     if (!initialHealth.available) return alert(initialHealth.message || 'No actionable coupons detected.');
-    clearPreviewMarks(); running = true; runStatus = state.automation.dryRun ? 'preview' : 'running'; controller = new AbortController(); Object.assign(runStats, { acted: 0, blocked: 0, failed: 0, previewed: 0 });
+    const dryRun = Boolean(state.automation.dryRun);
+    const maxActions = Math.floor(clampNumber(state.automation.maxActions, DEFAULT_STATE.automation.maxActions, 1, 1000));
+    const actionCount = () => runStats.acted + runStats.previewed + runStats.failed;
+    clearPreviewMarks(); running = true; runStatus = dryRun ? 'preview' : 'running'; controller = new AbortController(); Object.assign(runStats, { acted: 0, blocked: 0, failed: 0, previewed: 0 });
     const processed = new Set(); let failures = 0, idleCycles = 0, previousHeight = -1, previousKnown = -1; render();
     try {
-      while (!controller.signal.aborted && runStats.acted + runStats.previewed < Number(state.automation.maxActions) && idleCycles < 7) {
+      while (!controller.signal.aborted && actionCount() < maxActions && idleCycles < 7) {
         let progress = false;
         for (const item of classify(module.discoverItems(), module)) {
           if (controller.signal.aborted) break;
+          if (actionCount() >= maxActions) break;
           if (processed.has(item.id) || item.status !== 'available') continue;
           processed.add(item.id);
-          if (!item.decision.eligible) { runStats.blocked++; if (state.automation.dryRun) item.element?.style.setProperty('outline', '2px solid #f59e0b'); continue; }
+          if (!item.decision.eligible) { runStats.blocked++; if (dryRun) markPreview(item.element, 'blocked', '#f59e0b'); continue; }
           progress = true; item.element?.scrollIntoView({ behavior: 'smooth', block: 'center' }); await sleep(180, controller.signal);
-          if (state.automation.dryRun) { runStats.previewed++; item.element?.setAttribute(PREVIEW_ATTR, 'eligible'); item.element?.style.setProperty('outline', '2px solid #6366f1'); logActivity(`Would clip: ${item.title}`); }
+          if (dryRun) { runStats.previewed++; markPreview(item.element, 'eligible', '#6366f1'); logActivity(`Would clip: ${item.title}`); }
           else { try { await executeWithRetry(item.id, module, controller.signal); runStats.acted++; failures = 0; logActivity(`Clipped: ${item.title}`, 'success'); } catch (error) { if (error?.name === 'AbortError') throw error; runStats.failed++; failures++; logActivity(`Failed: ${item.title}`, 'error'); if (failures >= Number(state.automation.maxConsecutiveFailures)) throw new Error('Circuit breaker: repeated clip failures'); } }
           render(); await sleep(Number(state.automation.clickDelay) || 550, controller.signal);
         }
         const changed = await revealMore(module, controller.signal); const height = document.documentElement.scrollHeight; const known = module.discoverItems().length;
         idleCycles = (progress || changed || height !== previousHeight || known !== previousKnown) ? 0 : idleCycles + 1; previousHeight = height; previousKnown = known;
       }
-      runStatus = state.automation.dryRun ? 'preview-complete' : 'complete';
+      runStatus = dryRun ? 'preview-complete' : 'complete';
     } catch (error) { runStatus = error?.name === 'AbortError' ? 'stopped' : 'error'; if (runStatus === 'error') logActivity(error.message || 'Run stopped after an error', 'error'); }
-    finally { running = false; controller = null; getModuleState(module).lastRun = { at: new Date().toISOString(), dryRun: state.automation.dryRun, ...runStats, status: runStatus }; await persist(); refreshData(); }
+    finally { running = false; controller = null; getModuleState(module).lastRun = { at: new Date().toISOString(), dryRun, ...runStats, status: runStatus }; await persist(); refreshData(); }
   }
 
   function renderGroups() { const area = $('.chips'); area.innerHTML = ''; if (!activeModule) return; const moduleState = getModuleState(activeModule); for (const name of Object.keys(activeModule.defaultBlockedGroups || {})) { const button = document.createElement('button'); button.className = `chip${moduleState.enabledGroups[name] ? ' on' : ''}`; button.textContent = name; button.onclick = async () => { moduleState.enabledGroups[name] = !moduleState.enabledGroups[name]; await persist(); refreshData(); }; area.append(button); } }
   function renderTerms() { const area = $('.terms'); area.innerHTML = ''; if (!activeModule) return; const moduleState = getModuleState(activeModule); const key = activeRuleTab === 'always' ? 'alwaysTerms' : 'blockedTerms'; for (const term of moduleState[key]) { const tag = document.createElement('span'); tag.className = 'term'; tag.textContent = `${term} ×`; tag.onclick = async () => { moduleState[key] = moduleState[key].filter(value => value !== term); await persist(); refreshData(); }; area.append(tag); } }
-  function renderCoupons() { const query = normalize($('.search').value).toLowerCase(); const list = $('.couponList'); list.innerHTML = ''; for (const item of snapshot.filter(item => !query || item.text.toLowerCase().includes(query)).slice(0, 60)) { const row = document.createElement('div'); row.className = `coupon${!item.decision.eligible ? ' blocked' : item.status === 'clipped' ? ' clipped' : ''}`; row.innerHTML = `<div>${item.title}</div><div class="meta">${item.status === 'clipped' ? 'Clipped' : item.status === 'ambiguous' ? 'Needs review' : !item.decision.eligible ? `Blocked by “${item.decision.reason}”` : 'Eligible'}</div>`; row.onclick = () => item.element?.scrollIntoView({ behavior: 'smooth', block: 'center' }); list.append(row); } if (!list.children.length) list.innerHTML = '<div class="empty">No matching loaded coupons.</div>'; }
-  function renderActivity() { const list = $('.activityList'); list.innerHTML = activity.length ? activity.slice(0, 14).map(entry => `<div class="activity ${entry.level}">${entry.at.toLocaleTimeString()} · ${entry.message}</div>`).join('') : '<div class="empty">No run activity yet.</div>'; }
-  function render() { $('.sub').textContent = activeModule ? `${activeModule.name} · ${activeModule.description || ''}` : ''; $('.healthDot').className = `healthDot ${health?.level || ''}`; $('.healthText').textContent = health?.message || 'Inspecting page'; $('.found').textContent = snapshot.length; $('.eligible').textContent = snapshot.filter(item => item.status === 'available' && item.decision.eligible).length; $('.blockedCount').textContent = snapshot.filter(item => item.status === 'available' && !item.decision.eligible).length; $('.clippedCount').textContent = snapshot.filter(item => item.status === 'clipped').length; $('.dryRun').checked = Boolean(state.automation.dryRun); $('.delay').value = state.automation.clickDelay; $('.maxActions').value = state.automation.maxActions; $('.start').disabled = running || !health?.available; $('.stop').disabled = !running; $('.start').textContent = running ? 'Running…' : state.automation.dryRun ? 'Run dry preview' : 'Start clipping'; $('.runStatus').textContent = runStatus; app.classList.toggle('minimized', state.minimized); renderGroups(); renderTerms(); renderCoupons(); renderActivity(); }
+  function appendTextRow(list, className, title, detail) {
+    const row = document.createElement('div'); row.className = className;
+    const titleElement = document.createElement('div'); titleElement.textContent = title;
+    row.append(titleElement);
+    if (detail) { const detailElement = document.createElement('div'); detailElement.className = 'meta'; detailElement.textContent = detail; row.append(detailElement); }
+    list.append(row);
+    return row;
+  }
+  function renderCoupons() { const query = normalize($('.search').value).toLowerCase(); const list = $('.couponList'); list.innerHTML = ''; for (const item of snapshot.filter(item => !query || item.text.toLowerCase().includes(query)).slice(0, 60)) { const detail = item.status === 'clipped' ? 'Clipped' : item.status === 'ambiguous' ? 'Needs review' : !item.decision.eligible ? `Blocked by “${item.decision.reason}”` : 'Eligible'; const row = appendTextRow(list, `coupon${!item.decision.eligible ? ' blocked' : item.status === 'clipped' ? ' clipped' : ''}`, item.title, detail); row.onclick = () => item.element?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } if (!list.children.length) appendTextRow(list, 'empty', 'No matching loaded coupons.'); }
+  function renderActivity() { const list = $('.activityList'); list.innerHTML = ''; if (!activity.length) { appendTextRow(list, 'empty', 'No run activity yet.'); return; } for (const entry of activity.slice(0, 14)) appendTextRow(list, `activity ${entry.level}`, `${entry.at.toLocaleTimeString()} · ${entry.message}`); }
+  function render() { $('.sub').textContent = activeModule ? `${activeModule.name} · ${activeModule.description || ''}` : ''; $('.healthDot').className = `healthDot ${health?.level || ''}`; $('.healthText').textContent = health?.message || 'Inspecting page'; $('.found').textContent = snapshot.length; $('.eligible').textContent = snapshot.filter(item => item.status === 'available' && item.decision.eligible).length; $('.blockedCount').textContent = snapshot.filter(item => item.status === 'available' && !item.decision.eligible).length; $('.clippedCount').textContent = snapshot.filter(item => item.status === 'clipped').length; $('.dryRun').checked = Boolean(state.automation.dryRun); $('.dryRun').disabled = running; $('.delay').value = state.automation.clickDelay; $('.maxActions').value = state.automation.maxActions; $('.start').disabled = running || !health?.available; $('.stop').disabled = !running; $('.start').textContent = running ? 'Running…' : state.automation.dryRun ? 'Run dry preview' : 'Start clipping'; $('.runStatus').textContent = runStatus; app.classList.toggle('minimized', state.minimized); renderGroups(); renderTerms(); renderCoupons(); renderActivity(); }
 
   $('.search').oninput = renderCoupons;
   $('.addTerm').onclick = async () => { if (!activeModule) return; const input = $('.termInput'); const term = normalize(input.value).toLowerCase(); if (!term) return; const moduleState = getModuleState(activeModule); const key = activeRuleTab === 'always' ? 'alwaysTerms' : 'blockedTerms'; if (!moduleState[key].includes(term)) moduleState[key].push(term); input.value = ''; await persist(); refreshData(); };
   for (const tab of $$('.tab')) tab.onclick = () => { activeRuleTab = tab.dataset.tab; for (const candidate of $$('.tab')) candidate.classList.toggle('active', candidate === tab); renderTerms(); };
-  $('.dryRun').onchange = async event => { state.automation.dryRun = event.target.checked; await persist(); if (!event.target.checked) clearPreviewMarks(); render(); };
-  $('.delay').onchange = async event => { state.automation.clickDelay = Math.max(250, Math.min(5000, Number(event.target.value) || 550)); await persist(); render(); };
-  $('.maxActions').onchange = async event => { state.automation.maxActions = Math.max(1, Math.min(1000, Number(event.target.value) || 300)); await persist(); render(); };
+  $('.dryRun').onchange = async event => { if (running) return render(); state.automation.dryRun = event.target.checked; await persist(); if (!event.target.checked) clearPreviewMarks(); render(); };
+  $('.delay').onchange = async event => { state.automation.clickDelay = clampNumber(event.target.value, DEFAULT_STATE.automation.clickDelay, 250, 5000); await persist(); render(); };
+  $('.maxActions').onchange = async event => { state.automation.maxActions = Math.floor(clampNumber(event.target.value, DEFAULT_STATE.automation.maxActions, 1, 1000)); await persist(); render(); };
   $('.start').onclick = startRun; $('.stop').onclick = () => controller?.abort(); $('.minimize').onclick = async () => { state.minimized = !state.minimized; await persist(); render(); };
   GM_registerMenuCommand('Coupon Pilot: Open panel', async () => { state.minimized = false; await persist(); refreshData(); });
-  GM_registerMenuCommand('Coupon Pilot: Dry run', async () => { state.automation.dryRun = true; await persist(); startRun(); });
-  GM_registerMenuCommand('Coupon Pilot: Start clipping', async () => { state.automation.dryRun = false; await persist(); clearPreviewMarks(); startRun(); });
+  GM_registerMenuCommand('Coupon Pilot: Dry run', async () => { if (running) return; state.automation.dryRun = true; await persist(); startRun(); });
+  GM_registerMenuCommand('Coupon Pilot: Start clipping', async () => { if (running) return; state.automation.dryRun = false; await persist(); clearPreviewMarks(); startRun(); });
   new MutationObserver(() => scheduleRefresh(220)).observe(document.body, { childList: true, subtree: true });
   window.addEventListener('popstate', () => scheduleRefresh(250)); window.addEventListener('hashchange', () => scheduleRefresh(250));
   setInterval(() => { if (location.href !== lastUrl) { lastUrl = location.href; scheduleRefresh(300); } }, 700);

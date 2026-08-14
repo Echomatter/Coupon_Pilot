@@ -34,6 +34,7 @@ After changing the shell or a module:
 
 ```bash
 node scripts/build.mjs
+node scripts/build.mjs --check
 node tests/static-checks.mjs
 ```
 

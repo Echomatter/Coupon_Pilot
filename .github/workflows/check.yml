@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Rebuild distributable
-        run: node scripts/build.mjs
+      - name: Verify distributable
+        run: node scripts/build.mjs --check
       - name: Check syntax
         run: |
           node --check src/coupon-pilot.shell.js
