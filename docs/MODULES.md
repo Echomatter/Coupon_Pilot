@@ -25,6 +25,8 @@ A retailer module should provide these behaviors:
 }
 ```
 
+The registry validates the required module members when an adapter is registered.
+
 ### `matches()`
 
 Return `true` only when the current URL is a page the adapter understands.
@@ -50,6 +52,8 @@ Each item should have this shape:
 
 The `id` is important. Do not use the DOM node itself as identity because React/Vue/etc. may replace the node during rerenders. Prefer a retailer coupon/offer ID when the page exposes one; otherwise derive a deterministic hash from stable coupon text.
 
+A control should be marked `available` only when the adapter can identify the intended coupon action confidently. Disabled, hidden, or otherwise unclear controls should be `ambiguous`, not assumed to be clipped.
+
 ### `findLoadMore()`
 
 Return the site's visible **Load more / Show more** control or `null`.
@@ -60,13 +64,15 @@ This action is allowed during Dry Run because it only exposes more coupons; Dry 
 
 Resolve the current DOM representation for the coupon immediately before acting, then invoke the visible clip control.
 
-Do not keep a stale button reference across long waits.
+Do not keep a stale button reference across long waits. Reconfirm that the control is connected and still reports `available` immediately before the click.
 
 ### `verify(id, { timeout, signal })`
 
-Verify that the site visibly accepted the action. For example, wait until the coupon reports `Clipped` or leaves the unclipped list.
+Verify that the site visibly accepted the action. Prefer an explicit state transition such as `Clip` -> `Clipped`.
 
-A click is **not** considered successful just because `.click()` returned.
+A click is **not** considered successful just because `.click()` returned. Coupon Pilot's default posture is fail-closed: an item merely disappearing from the currently rendered DOM is not sufficient proof by itself, because virtualized lists and rerenders can also remove nodes.
+
+If a retailer genuinely removes a successfully clipped coupon, that behavior should be verified with a retailer-specific signal before disappearance is treated as success.
 
 ### `healthCheck()`
 
@@ -74,7 +80,7 @@ Return a lightweight diagnostic:
 
 ```js
 {
-  level: 'ready', // ready | done | warning
+  level: 'ready', // ready | caution | done | warning
   message: '42 ready to clip',
   found: 65,
   available: 42,
@@ -83,7 +89,9 @@ Return a lightweight diagnostic:
 }
 ```
 
-The shell can refuse to start when the page does not resemble what the module expects.
+`caution` can be used when safe actions exist but some controls are intentionally being skipped as ambiguous. `warning` should be used when the module cannot safely operate.
+
+The shell can refuse to start when the page does not resemble what the module expects or when no safely actionable coupons are available.
 
 ## Selector guidance
 
@@ -95,6 +103,8 @@ Use the most semantic/stable signal available, in this order when practical:
 4. conservative structural fallbacks.
 
 Avoid long CSS chains tied to presentation markup.
+
+When selecting a coupon card, validate that the candidate container owns the expected coupon control rather than accepting a broad parent that happens to contain several coupon cards.
 
 Never use a generic `Add` label as an alias for `Clip` on a retail site. Coupon Pilot should prefer a false negative over clicking an unrelated cart control.
 
@@ -115,8 +125,10 @@ A future module may add structured fields (brand, category, expiration, coupon v
 2. Register the adapter with `registerModule({...})`.
 3. Start with discovery + Dry Run only.
 4. Confirm stable item identity across lazy loading and rerenders.
-5. Add `perform()` and `verify()` only after selectors are reliable.
-6. Test the module health check in these states:
+5. Confirm broad container selectors cannot swallow multiple coupon cards.
+6. Add `perform()` and `verify()` only after selectors are reliable.
+7. Test explicit successful and failed post-click state transitions.
+8. Test the module health check in these states:
    - normal loaded coupons;
    - all visible coupons already clipped;
    - no coupons loaded yet;
@@ -124,4 +136,4 @@ A future module may add structured fields (brand, category, expiration, coupon v
 
 ## Deliberate non-goals
 
-Site modules should not implement CAPTCHA solving, browser fingerprint spoofing, proxy rotation, waiting-room bypasses, hidden checkout flows, or automatic bulk purchasing. Coupon Pilot's model is a logged-in user automating repetitive visible UI work.
+Site modules should stay focused on the visible, logged-in retailer UI and repetitive coupon work. They should not add mechanisms for bypassing retailer access controls or purchase limits.
