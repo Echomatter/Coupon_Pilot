@@ -10,7 +10,7 @@ From the repository root:
 node scripts/build.mjs
 ```
 
-This combines `src/coupon-pilot.shell.js` and `modules/harris-teeter.js` into `coupon-pilot.user.js`.
+This combines the shell and every adapter listed in `modules/manifest.mjs` into `coupon-pilot.user.js`.
 
 The root userscript is generated output. Edit the source files, not the generated file.
 
@@ -24,7 +24,12 @@ Because this repository is private, manual installation is the reliable path:
 4. In Tampermonkey, create a new script or open the existing Coupon Pilot script.
 5. Replace its contents and save.
 6. Confirm Coupon Pilot is enabled.
-7. Reload the Harris Teeter coupon page.
+7. Reload a supported coupon page.
+
+Supported coupon pages:
+
+- `https://www.harristeeter.com/savings/cl/coupons/`
+- `https://www.walgreens.com/offers/offers.jsp`
 
 Keep **Dry run** enabled after installation or a retailer-site change. Configure exclusions and keyword rules, run the preview, inspect the classifications, then disable Dry Run for a live clip run.
 
@@ -38,6 +43,7 @@ After changing the shell or a module:
 node scripts/build.mjs
 node scripts/build.mjs --check
 node tests/static-checks.mjs
+node tests/module-contracts.mjs
 ```
 
 Then replace the installed Tampermonkey script with the rebuilt `coupon-pilot.user.js`.

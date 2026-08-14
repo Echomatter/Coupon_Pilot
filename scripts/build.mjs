@@ -1,7 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { moduleFiles } from '../modules/manifest.mjs';
 
 const shellPath = new URL('../src/coupon-pilot.shell.js', import.meta.url);
-const modulePaths = [new URL('../modules/harris-teeter.js', import.meta.url)];
+if (!Array.isArray(moduleFiles) || !moduleFiles.length || moduleFiles.some(file => typeof file !== 'string' || !/^[a-z0-9-]+\.js$/.test(file))) throw new Error('Module manifest contains an invalid file');
+if (new Set(moduleFiles).size !== moduleFiles.length) throw new Error('Module manifest contains duplicates');
+const modulePaths = moduleFiles.map(file => new URL(`../modules/${file}`, import.meta.url));
 const outputPath = new URL('../coupon-pilot.user.js', import.meta.url);
 const normalizeNewlines = source => source.replace(/\r\n?/g, '\n');
 const shell = normalizeNewlines(await readFile(shellPath, 'utf8'));

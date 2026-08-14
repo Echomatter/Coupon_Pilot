@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Coupon Pilot
 // @namespace    https://echomatter.local
-// @version      0.3.3
+// @version      0.4.0
 // @description  Modular coupon-clipping assistant with rules, dry-run, verification, and retailer adapters.
 // @match        https://www.harristeeter.com/*
+// @match        https://www.walgreens.com/offers/*
 // @run-at       document-idle
 // @grant        GM_registerMenuCommand
 // @grant        GM_getValue
@@ -14,8 +15,10 @@
 (async function CouponPilot() {
   'use strict';
 
-  const APP_VERSION = '0.3.3';
-  const MODULE_API_VERSION = 1;
+  const APP_VERSION = '0.4.0';
+  const MODULE_API_VERSION = 2;
+  const ITEM_STATUS = Object.freeze({ AVAILABLE: 'available', CLIPPED: 'clipped', AMBIGUOUS: 'ambiguous' });
+  const VALID_ITEM_STATUSES = new Set(Object.values(ITEM_STATUS));
   const STORAGE_KEY = 'couponPilot:state';
   const PREVIEW_ATTR = 'data-coupon-pilot-preview';
 
@@ -74,6 +77,21 @@
   function safeCouponIdentity(text) {
     return normalize(text).toLowerCase().replace(/\b(clipped|unclip|remove coupon|clip coupon|clip)\b/g, '').replace(/\s+/g, ' ').trim();
   }
+  function controlLabel(element) {
+    return normalize([textOf(element), element?.getAttribute?.('aria-label'), element?.getAttribute?.('title')].filter(Boolean).join(' '));
+  }
+  function isUsableControl(element) {
+    return visible(element) && !element.disabled && element.getAttribute?.('aria-disabled') !== 'true';
+  }
+  function summarizeHealth(items) {
+    const available = items.filter(item => item.status === ITEM_STATUS.AVAILABLE).length;
+    const clipped = items.filter(item => item.status === ITEM_STATUS.CLIPPED).length;
+    const ambiguous = items.filter(item => item.status === ITEM_STATUS.AMBIGUOUS).length;
+    if (!items.length) return { level: 'warning', message: 'No coupon cards detected yet', found: 0, available: 0, clipped: 0, ambiguous: 0 };
+    if (!available && clipped && !ambiguous) return { level: 'done', message: 'No unclipped coupons currently detected', found: items.length, available, clipped, ambiguous };
+    if (ambiguous) return { level: available ? 'caution' : 'warning', message: available ? `${available} ready · ${ambiguous} skipped as ambiguous` : `${ambiguous} ambiguous coupon controls detected`, found: items.length, available, clipped, ambiguous };
+    return { level: 'ready', message: `${available} ready to clip`, found: items.length, available, clipped, ambiguous };
+  }
   function clampNumber(value, fallback, min, max) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
@@ -110,12 +128,35 @@
     for (const key of requiredFunctions) {
       if (typeof module[key] !== 'function') throw new Error(`Invalid Coupon Pilot module: ${key} must be a function`);
     }
+    if (module.defaultBlockedGroups != null) {
+      if (typeof module.defaultBlockedGroups !== 'object' || Array.isArray(module.defaultBlockedGroups)) throw new Error(`Invalid Coupon Pilot module: ${module.id} defaultBlockedGroups`);
+      for (const [groupName, terms] of Object.entries(module.defaultBlockedGroups)) {
+        if (!groupName.trim() || !Array.isArray(terms) || terms.some(term => typeof term !== 'string')) throw new Error(`Invalid Coupon Pilot module: ${module.id} blocked group ${groupName || 'missing'}`);
+      }
+    }
     if (modules.some(candidate => candidate.id === module.id)) throw new Error(`Duplicate Coupon Pilot module id: ${module.id}`);
     modules.push(module);
   }
 
-  const moduleApi = Object.freeze({ apiVersion: MODULE_API_VERSION, normalize, textOf, visible, hash, waitFor, safeCouponIdentity });
-  for (const factory of window.CouponPilotModuleFactories || []) registerModule(factory(moduleApi));
+  const moduleApi = Object.freeze({ apiVersion: MODULE_API_VERSION, ITEM_STATUS, normalize, textOf, visible, controlLabel, isUsableControl, hash, waitFor, safeCouponIdentity, summarizeHealth });
+  for (const factory of window.CouponPilotModuleFactories || []) {
+    if (typeof factory !== 'function') throw new Error('Invalid Coupon Pilot module factory');
+    registerModule(factory(moduleApi));
+  }
+
+  function discoverModuleItems(module) {
+    const items = module.discoverItems();
+    if (!Array.isArray(items)) throw new Error(`${module.id} discoverItems must return an array`);
+    const seen = new Set();
+    for (const item of items) {
+      if (!item || typeof item !== 'object') throw new Error(`${module.id} returned an invalid item`);
+      if (typeof item.id !== 'string' || !item.id.trim() || seen.has(item.id)) throw new Error(`${module.id} returned a missing or duplicate item id`);
+      if (typeof item.text !== 'string' || typeof item.title !== 'string') throw new Error(`${module.id} item ${item.id} is missing text or title`);
+      if (!VALID_ITEM_STATUSES.has(item.status)) throw new Error(`${module.id} item ${item.id} has invalid status ${item.status}`);
+      seen.add(item.id);
+    }
+    return items;
+  }
 
   function getActiveModule() {
     return modules.find(module => {
@@ -222,7 +263,7 @@
     activeModule = getActiveModule();
     if (!activeModule) { snapshot = []; health = null; host.style.display = 'none'; return; }
     host.style.display = '';
-    try { const discovered = activeModule.discoverItems(); snapshot = classify(discovered, activeModule); health = activeModule.healthCheck(discovered); }
+    try { const discovered = discoverModuleItems(activeModule); snapshot = classify(discovered, activeModule); health = activeModule.healthCheck(discovered); }
     catch (error) { snapshot = []; health = { level: 'warning', message: 'Module inspection failed', found: 0, available: 0, clipped: 0, ambiguous: 0 }; console.warn('[Coupon Pilot] refresh failed', error); }
     render();
   }
@@ -239,23 +280,23 @@
   }
 
   async function revealMore(module, signal) {
-    const beforeKnown = module.discoverItems().length;
+    const beforeKnown = discoverModuleItems(module).length;
     const beforeHeight = document.documentElement.scrollHeight;
     const loadMore = module.findLoadMore?.();
     if (loadMore) {
       loadMore.scrollIntoView({ behavior: 'smooth', block: 'center' }); loadMore.click();
-      const revealed = await waitFor(() => module.discoverItems().length > beforeKnown || document.documentElement.scrollHeight > beforeHeight, { timeout: Number(state.automation.scrollDelay) + 1800, interval: 180, signal });
+      const revealed = await waitFor(() => discoverModuleItems(module).length > beforeKnown || document.documentElement.scrollHeight > beforeHeight, { timeout: Number(state.automation.scrollDelay) + 1800, interval: 180, signal });
       return Boolean(revealed);
     }
     window.scrollBy({ top: Math.max(420, innerHeight * .82), behavior: 'smooth' });
     await sleep(Number(state.automation.scrollDelay) || 900, signal);
-    return document.documentElement.scrollHeight !== beforeHeight || module.discoverItems().length !== beforeKnown;
+    return document.documentElement.scrollHeight !== beforeHeight || discoverModuleItems(module).length !== beforeKnown;
   }
 
   async function startRun() {
     if (running) return;
     const module = getActiveModule(); if (!module) return;
-    const initialItems = module.discoverItems(); const initialHealth = module.healthCheck(initialItems);
+    const initialItems = discoverModuleItems(module); const initialHealth = module.healthCheck(initialItems);
     if (!initialHealth.available) return alert(initialHealth.message || 'No actionable coupons detected.');
     const dryRun = Boolean(state.automation.dryRun);
     const maxActions = Math.floor(clampNumber(state.automation.maxActions, DEFAULT_STATE.automation.maxActions, 1, 1000));
@@ -265,7 +306,7 @@
     try {
       while (!controller.signal.aborted && actionCount() < maxActions && idleCycles < 7) {
         let progress = false;
-        for (const item of classify(module.discoverItems(), module)) {
+        for (const item of classify(discoverModuleItems(module), module)) {
           if (controller.signal.aborted) break;
           if (actionCount() >= maxActions) break;
           if (processed.has(item.id) || item.status !== 'available') continue;
@@ -276,7 +317,7 @@
           else { try { await executeWithRetry(item.id, module, controller.signal); runStats.acted++; failures = 0; logActivity(`Clipped: ${item.title}`, 'success'); } catch (error) { if (error?.name === 'AbortError') throw error; runStats.failed++; failures++; logActivity(`Failed: ${item.title}`, 'error'); if (failures >= Number(state.automation.maxConsecutiveFailures)) throw new Error('Circuit breaker: repeated clip failures'); } }
           render(); await sleep(Number(state.automation.clickDelay) || 550, controller.signal);
         }
-        const changed = await revealMore(module, controller.signal); const height = document.documentElement.scrollHeight; const known = module.discoverItems().length;
+        const changed = await revealMore(module, controller.signal); const height = document.documentElement.scrollHeight; const known = discoverModuleItems(module).length;
         idleCycles = (progress || changed || height !== previousHeight || known !== previousKnown) ? 0 : idleCycles + 1; previousHeight = height; previousKnown = known;
       }
       runStatus = dryRun ? 'preview-complete' : 'complete';

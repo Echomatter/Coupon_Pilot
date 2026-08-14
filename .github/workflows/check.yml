@@ -16,6 +16,10 @@ jobs:
         run: |
           node --check src/coupon-pilot.shell.js
           node --check modules/harris-teeter.js
+          node --check modules/walgreens.js
+          node --check modules/manifest.mjs
           node --check coupon-pilot.user.js
       - name: Check safety contract
-        run: node tests/static-checks.mjs
+        run: |
+          node tests/static-checks.mjs
+          node tests/module-contracts.mjs

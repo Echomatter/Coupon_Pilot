@@ -9,7 +9,7 @@ The codebase is modular even though installation stays simple:
 - `scripts/build.mjs` combines those sources into the single distributable `coupon-pilot.user.js`.
 - Tampermonkey installs only `coupon-pilot.user.js`.
 
-The first adapter targets **Harris Teeter digital coupons**.
+The included adapters target **Harris Teeter digital coupons** and **Walgreens coupons and rebates**.
 
 ## Current behavior
 
@@ -28,7 +28,7 @@ Because the repository is private, manual Tampermonkey installation remains the 
 1. Run `node scripts/build.mjs` after source changes.
 2. Copy `coupon-pilot.user.js`.
 3. Create or replace the Coupon Pilot script in Tampermonkey.
-4. Reload the Harris Teeter coupon page.
+4. Reload a supported Harris Teeter or Walgreens coupon page.
 5. Run Dry Run before the first live run after an update.
 
 See `docs/INSTALL.md` for details.
@@ -41,6 +41,7 @@ Edit the shell or retailer modules, then rebuild:
 node scripts/build.mjs
 node scripts/build.mjs --check
 node tests/static-checks.mjs
+node tests/module-contracts.mjs
 node --check coupon-pilot.user.js
 ```
 
@@ -48,6 +49,6 @@ Do not hand-edit the generated `coupon-pilot.user.js`; CI verifies that it match
 
 ## Add another retailer
 
-Create another file under `modules/` that registers a module factory, add it to `scripts/build.mjs`, add the retailer `@match` metadata to the shell, rebuild, and test in Dry Run.
+Create another file under `modules/` that registers a module factory, add it to `modules/manifest.mjs`, add the retailer `@match` metadata to the shell, rebuild, and test in Dry Run.
 
 See `docs/MODULES.md` for the adapter contract.
