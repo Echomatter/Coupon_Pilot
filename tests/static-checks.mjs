@@ -27,9 +27,13 @@ assert.match(shell, /markPreview\(item\.element, 'blocked'/, 'blocked preview ma
 assert.ok(!shell.includes('row.innerHTML ='), 'retailer-controlled coupon text must not be interpolated into HTML');
 assert.ok(!built.includes('globalThis'), 'installable userscript must pass Tampermonkey browser linting');
 assert.match(shell, /tab\.onclick = selectRuleTab/, 'tab handlers must not declare functions inside a loop');
+assert.match(shell, /GM_setClipboard/, 'copyable debug reports must remain available');
+assert.match(shell, /ambiguousSamples/, 'debug reports must include ambiguous control samples');
 assert.match(harrisTeeter, /apiVersion:\s*1/, 'adapter API version missing');
 assert.match(harrisTeeter, /async verify\(/, 'adapter must verify actions');
 assert.match(harrisTeeter, /healthCheck\(/, 'adapter must expose health check');
 assert.match(harrisTeeter, /safeCouponIdentity/, 'stable fallback coupon identity is missing');
+assert.match(harrisTeeter, /\^clip\(\?:\\s\+for\\s\+coupon:/, 'Harris Teeter accessible Clip labels must be recognized');
+assert.match(harrisTeeter, /CouponCard-\(\.\+\)/, 'Harris Teeter card IDs must use the stable site identifier');
 assert.ok(!harrisTeeter.includes('\\badd\\b'), 'generic Add matching is forbidden');
 console.log('Coupon Pilot static safety checks passed.');

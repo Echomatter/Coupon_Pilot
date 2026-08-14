@@ -28,6 +28,8 @@ Because this repository is private, manual installation is the reliable path:
 
 Keep **Dry run** enabled after installation or a retailer-site change. Configure exclusions and keyword rules, run the preview, inspect the classifications, then disable Dry Run for a live clip run.
 
+If Coupon Pilot reports ambiguous controls after a retailer-site change, click the **🐞** button in the footer. It copies a debug report containing version, page, counts, settings, and a small sample of ambiguous control labels. The report excludes custom keyword text and account information.
+
 ## Updating
 
 After changing the shell or a module:

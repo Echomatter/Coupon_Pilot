@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Coupon Pilot
 // @namespace    https://echomatter.local
-// @version      0.3.2
+// @version      0.3.3
 // @description  Modular coupon-clipping assistant with rules, dry-run, verification, and retailer adapters.
 // @match        https://www.harristeeter.com/*
 // @run-at       document-idle
 // @grant        GM_registerMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_setClipboard
 // ==/UserScript==
 
 // GENERATED FILE: edit src/coupon-pilot.shell.js or modules/*.js, then run node scripts/build.mjs.
@@ -32,10 +33,10 @@
       },
       matches() { return location.hostname === 'www.harristeeter.com' && /\/coupons(?:\/|$)/i.test(location.pathname); },
       isCouponControl(element) { if (!visible(element)) return false; const label = `${textOf(element)} ${normalize(element.getAttribute('aria-label'))}`; return /\bclip\b/i.test(label) || /\bclipped\b/i.test(label) || /\bunclip\b/i.test(label); },
-      controlStatus(element) { if (!visible(element)) return 'ambiguous'; const visibleText = textOf(element); const label = `${visibleText} ${normalize(element.getAttribute('aria-label'))}`; if (/\bclipped\b|\bunclip\b|\bremove coupon\b/i.test(label)) return 'clipped'; const explicitClip = /^clip$/i.test(visibleText) || /\bclip coupon\b/i.test(label); return explicitClip && !element.disabled && element.getAttribute('aria-disabled') !== 'true' ? 'available' : 'ambiguous'; },
+      controlStatus(element) { if (!visible(element)) return 'ambiguous'; const visibleText = normalize(element.innerText || element.textContent); const accessibleName = normalize(element.getAttribute('aria-label') || element.getAttribute('title')); const label = `${visibleText} ${accessibleName}`; if (/\bclipped\b|\bunclip\b|\bremove coupon\b/i.test(label)) return 'clipped'; const explicitClip = /^clip$/i.test(visibleText) || /^clip(?:\s+for\s+coupon:|\s+coupon\b|$)/i.test(accessibleName); return explicitClip && !element.disabled && element.getAttribute('aria-disabled') !== 'true' ? 'available' : 'ambiguous'; },
       couponControlsWithin(element) { return [...element.querySelectorAll('button, a, [role="button"]')].filter(control => this.isCouponControl(control)); },
-      findCard(control) { for (const selector of ['[data-testid*="coupon" i]','[data-qa*="coupon" i]','[data-cy*="coupon" i]','[data-component*="coupon" i]']) { const candidate = control.closest(selector); if (!candidate) continue; const text = textOf(candidate); const controls = this.couponControlsWithin(candidate); if (text.length >= 20 && text.length <= 2500 && controls.length === 1) return candidate; } let node = control.parentElement; for (let depth = 0; depth < 8 && node; depth++, node = node.parentElement) { const text = textOf(node); if (text.length < 20 || text.length > 2200) continue; if (!/\bsave\b|\bexpires?\b|\bcoupon\b|\boff\b/i.test(text)) continue; const controls = this.couponControlsWithin(node); if (controls.length === 1 && controls[0] === control) return node; } return null; },
-      itemId(card) { const direct = card?.getAttribute('data-coupon-id') || card?.getAttribute('data-offer-id'); if (direct) return `ht:${direct}`; const nested = card?.querySelector('[data-coupon-id], [data-offer-id]'); const nestedId = nested?.getAttribute('data-coupon-id') || nested?.getAttribute('data-offer-id'); return nestedId ? `ht:${nestedId}` : `ht:${hash(safeCouponIdentity(textOf(card)))}`; },
+      findCard(control) { for (const selector of ['[data-testid^="CouponCard-"]','[data-testid="coupon-grid-card"]','[data-testid*="coupon" i]','[data-qa*="coupon" i]','[data-cy*="coupon" i]','[data-component*="coupon" i]']) { const candidate = control.closest(selector); if (!candidate) continue; const text = textOf(candidate); const controls = this.couponControlsWithin(candidate); if (text.length >= 20 && text.length <= 2500 && controls.length === 1) return candidate; } let node = control.parentElement; for (let depth = 0; depth < 8 && node; depth++, node = node.parentElement) { const text = textOf(node); if (text.length < 20 || text.length > 2200) continue; if (!/\bsave\b|\bexpires?\b|\bcoupon\b|\boff\b/i.test(text)) continue; const controls = this.couponControlsWithin(node); if (controls.length === 1 && controls[0] === control) return node; } return null; },
+      itemId(card) { const direct = card?.getAttribute('data-coupon-id') || card?.getAttribute('data-offer-id'); if (direct) return `ht:${direct}`; const testId = card?.getAttribute('data-testid'); const testIdMatch = testId?.match(/^CouponCard-(.+)$/i); if (testIdMatch) return `ht:${testIdMatch[1]}`; const nested = card?.querySelector('[data-coupon-id], [data-offer-id]'); const nestedId = nested?.getAttribute('data-coupon-id') || nested?.getAttribute('data-offer-id'); return nestedId ? `ht:${nestedId}` : `ht:${hash(safeCouponIdentity(textOf(card)))}`; },
       discoverItems() { const controls = [...document.querySelectorAll('button, a, [role="button"]')].filter(control => this.isCouponControl(control)); const byId = new Map(); for (const control of controls) { const card = this.findCard(control); if (!card) continue; const text = textOf(card); if (!text) continue; const id = this.itemId(card); const status = this.controlStatus(control); const title = normalize((card.innerText || card.textContent || text).split('\n').map(line => line.trim()).filter(Boolean).filter(line => !/^(clip|clipped|unclip)$/i.test(line)).slice(0,3).join(' · ')) || text.slice(0,140); const item = { id, text, title: title.slice(0,180), element: card, control, status }; const previous = byId.get(id); if (!previous || (previous.status === 'ambiguous' && status !== 'ambiguous')) byId.set(id,item); } return [...byId.values()]; },
       findLoadMore() { const couponControls = [...document.querySelectorAll('button, a, [role="button"]')].filter(control => this.isCouponControl(control)); const roots = [...new Set(couponControls.map(control => this.findCard(control)?.parentElement).filter(Boolean))]; for (const root of roots) { const candidate = [...root.querySelectorAll('button, a, [role="button"]')].find(element => visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true' && /^(load more|show more|more coupons)$/i.test(textOf(element))); if (candidate) return candidate; } return null; },
       getItem(id) { return this.discoverItems().find(item => item.id === id) || null; },
@@ -49,7 +50,7 @@
 (async function CouponPilot() {
   'use strict';
 
-  const APP_VERSION = '0.3.2';
+  const APP_VERSION = '0.3.3';
   const MODULE_API_VERSION = 1;
   const STORAGE_KEY = 'couponPilot:state';
   const PREVIEW_ATTR = 'data-coupon-pilot-preview';
@@ -84,7 +85,7 @@
   });
 
   const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
-  const textOf = element => normalize([element?.innerText, element?.textContent, element?.getAttribute?.('aria-label'), element?.getAttribute?.('title')].filter(Boolean).join(' '));
+  const textOf = element => normalize(element?.innerText || element?.textContent || element?.getAttribute?.('aria-label') || element?.getAttribute?.('title'));
   const visible = element => {
     if (!element?.isConnected) return false;
     const style = getComputedStyle(element);
@@ -195,13 +196,59 @@
   host.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2147483647;display:none;max-width:calc(100vw - 24px)';
   document.documentElement.appendChild(host);
   const shadow = host.attachShadow({ mode: 'open' });
-  shadow.innerHTML = `<style>*{box-sizing:border-box}button,input{font:inherit}.app{width:min(390px,calc(100vw - 36px));max-height:calc(100vh - 36px);overflow:auto;color:#eef2ff;background:#101522;border:1px solid #ffffff1c;border-radius:18px;box-shadow:0 24px 70px #0007;font:13px/1.35 system-ui,sans-serif}.app.minimized .body,.app.minimized .footer,.app.minimized .health{display:none}.header,.health,.section,.footer{padding:12px 14px}.header,.health,.footer{display:flex;align-items:center;gap:10px}.header,.health,.section{border-bottom:1px solid #ffffff12}.title{font-weight:800;flex:1}.sub,.health,.meta,.empty{color:#94a3b8;font-size:11px}.sectionTitle{font-size:10px;font-weight:800;text-transform:uppercase;color:#94a3b8;margin-bottom:8px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.stat{padding:8px;background:#ffffff09;border-radius:10px}.value{font-size:16px;font-weight:800}.chips,.terms{display:flex;flex-wrap:wrap;gap:6px}.chip,.tab,.ghost,.primary,.danger,.icon{border:0;border-radius:9px;cursor:pointer}.chip,.tab,.ghost,.icon{background:#ffffff10;color:#cbd5e1}.chip.on{background:#6d28d933;color:white}.chip{padding:6px 9px}.tabs{display:flex;gap:6px;margin-bottom:8px}.tab{padding:6px 9px}.tab.active{background:#4f46e555;color:white}.row{display:flex;gap:7px}.row input,.search{width:100%;padding:8px 10px;background:#ffffff0a;border:1px solid #ffffff18;border-radius:9px;color:white}.term{padding:5px 8px;border-radius:8px;background:#ffffff0a}.coupon,.activity{padding:7px 0;border-bottom:1px solid #ffffff0d}.blocked{color:#fca5a5}.clipped{color:#86efac}.footer{position:sticky;bottom:0;background:#101522}.primary,.danger{padding:10px 12px;color:white}.primary{background:#4f46e5;flex:1}.danger{background:#7f1d1d}.icon{padding:6px 9px}.healthDot{width:8px;height:8px;border-radius:50%;background:#64748b}.healthDot.ready{background:#34d399}.healthDot.caution{background:#fbbf24}.healthDot.warning{background:#f97316}.healthDot.done{background:#60a5fa}</style><div class="app"><div class="header"><strong class="title">Coupon Pilot</strong><span class="sub"></span><button class="icon minimize">−</button></div><div class="health"><span class="healthDot"></span><span class="healthText">Inspecting page</span><span class="sub">v${APP_VERSION}</span></div><div class="body"><div class="section"><input class="search" placeholder="Search loaded coupons…"></div><div class="section"><div class="stats"><div class="stat"><div class="value found">0</div><div class="meta">Found</div></div><div class="stat"><div class="value eligible">0</div><div class="meta">Eligible</div></div><div class="stat"><div class="value blockedCount">0</div><div class="meta">Blocked</div></div><div class="stat"><div class="value clippedCount">0</div><div class="meta">Clipped</div></div></div></div><div class="section"><div class="sectionTitle">Quick exclusions</div><div class="chips"></div></div><div class="section"><div class="sectionTitle">Keyword rules</div><div class="tabs"><button class="tab active" data-tab="block">Never clip</button><button class="tab" data-tab="always">Always clip</button></div><div class="row"><input class="termInput" placeholder="e.g. formula"><button class="ghost addTerm">Add</button></div><div class="terms"></div></div><div class="section"><label><input class="dryRun" type="checkbox"> Dry run</label> · <label>Delay <input class="delay" type="number" min="250" max="5000" style="width:72px"></label> · <label>Max <input class="maxActions" type="number" min="1" max="1000" style="width:72px"></label></div><div class="section"><div class="sectionTitle">Loaded coupons</div><div class="couponList"></div></div><div class="section"><div class="sectionTitle">Activity · <span class="runStatus">Idle</span></div><div class="activityList"></div></div></div><div class="footer"><button class="primary start">Run dry preview</button><button class="danger stop" disabled>Stop</button></div></div>`;
+  shadow.innerHTML = `<style>*{box-sizing:border-box}button,input{font:inherit}.app{width:min(390px,calc(100vw - 36px));max-height:calc(100vh - 36px);overflow:auto;color:#eef2ff;background:#101522;border:1px solid #ffffff1c;border-radius:18px;box-shadow:0 24px 70px #0007;font:13px/1.35 system-ui,sans-serif}.app.minimized .body,.app.minimized .footer,.app.minimized .health{display:none}.header,.health,.section,.footer{padding:12px 14px}.header,.health,.footer{display:flex;align-items:center;gap:10px}.header,.health,.section{border-bottom:1px solid #ffffff12}.title{font-weight:800;flex:1}.sub,.health,.meta,.empty{color:#94a3b8;font-size:11px}.sectionTitle{font-size:10px;font-weight:800;text-transform:uppercase;color:#94a3b8;margin-bottom:8px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.stat{padding:8px;background:#ffffff09;border-radius:10px}.value{font-size:16px;font-weight:800}.chips,.terms{display:flex;flex-wrap:wrap;gap:6px}.chip,.tab,.ghost,.primary,.danger,.icon{border:0;border-radius:9px;cursor:pointer}.chip,.tab,.ghost,.icon{background:#ffffff10;color:#cbd5e1}.chip.on{background:#6d28d933;color:white}.chip{padding:6px 9px}.tabs{display:flex;gap:6px;margin-bottom:8px}.tab{padding:6px 9px}.tab.active{background:#4f46e555;color:white}.row{display:flex;gap:7px}.row input,.search{width:100%;padding:8px 10px;background:#ffffff0a;border:1px solid #ffffff18;border-radius:9px;color:white}.term{padding:5px 8px;border-radius:8px;background:#ffffff0a}.coupon,.activity{padding:7px 0;border-bottom:1px solid #ffffff0d}.blocked{color:#fca5a5}.clipped{color:#86efac}.footer{position:sticky;bottom:0;background:#101522}.primary,.danger{padding:10px 12px;color:white}.primary{background:#4f46e5;flex:1}.danger{background:#7f1d1d}.icon{padding:6px 9px}.healthDot{width:8px;height:8px;border-radius:50%;background:#64748b}.healthDot.ready{background:#34d399}.healthDot.caution{background:#fbbf24}.healthDot.warning{background:#f97316}.healthDot.done{background:#60a5fa}</style><div class="app"><div class="header"><strong class="title">Coupon Pilot</strong><span class="sub"></span><button class="icon minimize">−</button></div><div class="health"><span class="healthDot"></span><span class="healthText">Inspecting page</span><span class="sub">v${APP_VERSION}</span></div><div class="body"><div class="section"><input class="search" placeholder="Search loaded coupons…"></div><div class="section"><div class="stats"><div class="stat"><div class="value found">0</div><div class="meta">Found</div></div><div class="stat"><div class="value eligible">0</div><div class="meta">Eligible</div></div><div class="stat"><div class="value blockedCount">0</div><div class="meta">Blocked</div></div><div class="stat"><div class="value clippedCount">0</div><div class="meta">Clipped</div></div></div></div><div class="section"><div class="sectionTitle">Quick exclusions</div><div class="chips"></div></div><div class="section"><div class="sectionTitle">Keyword rules</div><div class="tabs"><button class="tab active" data-tab="block">Never clip</button><button class="tab" data-tab="always">Always clip</button></div><div class="row"><input class="termInput" placeholder="e.g. formula"><button class="ghost addTerm">Add</button></div><div class="terms"></div></div><div class="section"><label><input class="dryRun" type="checkbox"> Dry run</label> · <label>Delay <input class="delay" type="number" min="250" max="5000" style="width:72px"></label> · <label>Max <input class="maxActions" type="number" min="1" max="1000" style="width:72px"></label></div><div class="section"><div class="sectionTitle">Loaded coupons</div><div class="couponList"></div></div><div class="section"><div class="sectionTitle">Activity · <span class="runStatus">Idle</span></div><div class="activityList"></div></div></div><div class="footer"><button class="icon debug" aria-label="Copy debug report" title="Copy debug report">🐞</button><button class="primary start">Run dry preview</button><button class="danger stop" disabled>Stop</button></div></div>`;
 
   const $ = selector => shadow.querySelector(selector);
   const $$ = selector => [...shadow.querySelectorAll(selector)];
   const app = $('.app');
 
   function logActivity(message, level = 'info') { activity.unshift({ message, level, at: new Date() }); activity.splice(20); renderActivity(); }
+  function createDebugReport() {
+    const moduleState = activeModule ? getModuleState(activeModule) : null;
+    const counts = { available: 0, clipped: 0, ambiguous: 0 };
+    for (const item of snapshot) counts[item.status] = (counts[item.status] || 0) + 1;
+    return {
+      app: 'Coupon Pilot',
+      version: APP_VERSION,
+      capturedAt: new Date().toISOString(),
+      page: `${location.origin}${location.pathname}`,
+      module: activeModule ? { id: activeModule.id, name: activeModule.name, apiVersion: activeModule.apiVersion } : null,
+      health,
+      items: { total: snapshot.length, ...counts },
+      automation: {
+        dryRun: Boolean(state.automation.dryRun),
+        clickDelay: state.automation.clickDelay,
+        verifyTimeout: state.automation.verifyTimeout,
+        maxActions: state.automation.maxActions,
+        retryAttempts: state.automation.retryAttempts
+      },
+      rules: moduleState ? {
+        blockedTermCount: moduleState.blockedTerms.length,
+        alwaysTermCount: moduleState.alwaysTerms.length,
+        enabledGroups: Object.entries(moduleState.enabledGroups).filter(([, enabled]) => enabled).map(([name]) => name)
+      } : null,
+      ambiguousSamples: snapshot.filter(item => item.status === 'ambiguous').slice(0, 15).map(item => ({
+        id: item.id,
+        title: item.title,
+        controlText: normalize(item.control?.innerText || item.control?.textContent).slice(0, 120),
+        ariaLabel: normalize(item.control?.getAttribute?.('aria-label')).slice(0, 180),
+        testId: item.control?.getAttribute?.('data-testid') || null,
+        disabled: Boolean(item.control?.disabled),
+        ariaDisabled: item.control?.getAttribute?.('aria-disabled') || null
+      }))
+    };
+  }
+  async function copyDebugReport() {
+    const report = JSON.stringify(createDebugReport(), null, 2);
+    try {
+      if (typeof GM_setClipboard === 'function') GM_setClipboard(report, 'text');
+      else await navigator.clipboard.writeText(report);
+      logActivity('Debug report copied to clipboard', 'success');
+    } catch (error) {
+      console.warn('[Coupon Pilot] debug copy failed', error);
+      logActivity('Could not copy debug report', 'error');
+    }
+  }
   function markPreview(element, kind, color) {
     element?.setAttribute(PREVIEW_ATTR, kind);
     element?.style.setProperty('outline', `2px solid ${color}`);
@@ -294,7 +341,7 @@
   $('.dryRun').onchange = async event => { if (running) return render(); state.automation.dryRun = event.target.checked; await persist(); if (!event.target.checked) clearPreviewMarks(); render(); };
   $('.delay').onchange = async event => { state.automation.clickDelay = clampNumber(event.target.value, DEFAULT_STATE.automation.clickDelay, 250, 5000); await persist(); render(); };
   $('.maxActions').onchange = async event => { state.automation.maxActions = Math.floor(clampNumber(event.target.value, DEFAULT_STATE.automation.maxActions, 1, 1000)); await persist(); render(); };
-  $('.start').onclick = startRun; $('.stop').onclick = () => controller?.abort(); $('.minimize').onclick = async () => { state.minimized = !state.minimized; await persist(); render(); };
+  $('.debug').onclick = copyDebugReport; $('.start').onclick = startRun; $('.stop').onclick = () => controller?.abort(); $('.minimize').onclick = async () => { state.minimized = !state.minimized; await persist(); render(); };
   GM_registerMenuCommand('Coupon Pilot: Open panel', async () => { state.minimized = false; await persist(); refreshData(); });
   GM_registerMenuCommand('Coupon Pilot: Dry run', async () => { if (running) return; state.automation.dryRun = true; await persist(); startRun(); });
   GM_registerMenuCommand('Coupon Pilot: Start clipping', async () => { if (running) return; state.automation.dryRun = false; await persist(); clearPreviewMarks(); startRun(); });
