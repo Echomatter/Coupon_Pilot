@@ -1,52 +1,61 @@
 # Coupon Pilot
 
-Coupon Pilot is a small Tampermonkey userscript platform for automating repetitive coupon-clipping work in the browser.
+Coupon Pilot is a Tampermonkey userscript for applying digital coupons with a retailer-specific, independently installable module system.
 
-The codebase is modular even though installation stays simple:
+It is designed for local, reviewable automation: the shared shell handles safety, state, and diagnostics while each retailer module contains only the page-specific behavior.
 
-- `src/coupon-pilot.shell.js` owns UI, rules, persistence, run controls, retries, diagnostics, and module registration.
-- `modules/*.js` contain retailer-specific DOM knowledge.
-- `scripts/build.mjs` combines those sources into the single distributable `coupon-pilot.user.js`.
-- Tampermonkey installs only `coupon-pilot.user.js`.
+- `coupon-pilot.user.js` is the generated base userscript. It owns the UI, module manager, shared cross-retailer rules, persistence, run controls, retries, diagnostics, and safety checks.
+- `modules/*.js` are standalone local module files. Each owns only one retailer's URL patterns and DOM behavior.
+- Installed module source is validated and stored in Tampermonkey storage. Updating the base script does not erase installed modules.
 
-The first adapter targets **Harris Teeter digital coupons**.
+Included modules:
 
-## Current behavior
+- **Harris Teeter**
+- **Lowes Foods**
+- **Walgreens**
 
-Coupon Pilot includes a compact control panel, Dry Run, exclusion and always-clip rules, persistent local settings, stable coupon identities, bounded retry, click verification, a circuit breaker, abortable runs, lazy-load handling, and module health checks.
+Modules are local files and are not compiled into the base userscript. This keeps retailer updates independent from the shell.
 
-The engine remains deliberately fail-closed:
+## Quick start
+
+1. Install or replace the Tampermonkey script with `coupon-pilot.user.js`.
+2. Accept its broad website access. The shell needs this so modules can target supported retailer pages without rebuilding the base.
+3. Open the Tampermonkey menu and choose **Coupon Pilot: Manage modules**.
+4. Click **Browse for local module…** and select a trusted file such as `modules/walgreens.js`.
+5. Confirm the module, reload its coupon page, and run **Dry Run** first.
+
+See `docs/INSTALL.md` for the complete local workflow and `docs/MODULES.md` for the API v3 contract.
+
+## Safety model
+
+Coupon Pilot is fail-closed:
 
 `discover -> classify -> act -> verify -> record`
 
-If Coupon Pilot cannot confidently identify or verify a coupon action, it skips or stops rather than clicking blindly.
-
-## Install
-
-Because the repository is private, manual Tampermonkey installation remains the reliable path:
-
-1. Run `node scripts/build.mjs` after source changes.
-2. Copy `coupon-pilot.user.js`.
-3. Create or replace the Coupon Pilot script in Tampermonkey.
-4. Reload the Harris Teeter coupon page.
-5. Run Dry Run before the first live run after an update.
-
-See `docs/INSTALL.md` for details.
+Modules are executable JavaScript, not data files. Before saving a module, the manager validates its identity, version, API compatibility, registration count, and adapter surface. These checks do not make untrusted JavaScript safe—only install module files you trust.
 
 ## Development
 
-Edit the shell or retailer modules, then rebuild:
+Edit the shell or a standalone module, then run the focused checks:
 
 ```bash
 node scripts/build.mjs
+node scripts/build.mjs --check
 node tests/static-checks.mjs
+node tests/module-contracts.mjs
+node tests/module-manager.mjs
+node tests/privacy-checks.mjs
 node --check coupon-pilot.user.js
 ```
 
-Do not hand-edit the generated `coupon-pilot.user.js`; CI verifies that it matches the modular sources.
+Do not hand-edit `coupon-pilot.user.js`; it is generated from `src/coupon-pilot.shell.js`. Editing a retailer module does not require rebuilding the base script—install the changed module file through the manager again to update it.
 
-## Add another retailer
+## Project layout
 
-Create another file under `modules/` that registers a module factory, add it to `scripts/build.mjs`, add the retailer `@match` metadata to the shell, rebuild, and test in Dry Run.
-
-See `docs/MODULES.md` for the adapter contract.
+```text
+src/coupon-pilot.shell.js  Source for the generated userscript
+coupon-pilot.user.js       Generated Tampermonkey userscript
+modules/                   Standalone retailer modules
+docs/                      Installation and module-contract documentation
+tests/                     Static, contract, manager, and privacy checks
+```
