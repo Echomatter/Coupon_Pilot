@@ -16,6 +16,7 @@ jobs:
         run: |
           node --check src/coupon-pilot.shell.js
           node --check modules/harris-teeter.js
+          node --check modules/lowes-foods.js
           node --check modules/walgreens.js
           node --check modules/manifest.mjs
           node --check coupon-pilot.user.js
@@ -23,3 +24,5 @@ jobs:
         run: |
           node tests/static-checks.mjs
           node tests/module-contracts.mjs
+          node tests/module-manager.mjs
+          node tests/privacy-checks.mjs

@@ -1,23 +1,21 @@
-(function registerWalgreensModule(global) {
+// ==CouponPilotModule==
+// @id           walgreens
+// @name         Walgreens
+// @version      1.0.0
+// @api          3
+// @description  Coupons and rebates
+// @match        https://www.walgreens.com/offers/*
+// ==/CouponPilotModule==
+
+(function registerWalgreensModule(CouponPilot) {
   'use strict';
 
-  global.CouponPilotModuleFactories ??= [];
-  global.CouponPilotModuleFactories.push(api => {
+  CouponPilot.register(api => {
     const { apiVersion, ITEM_STATUS, normalize, textOf, visible, isUsableControl, waitFor, summarizeHealth } = api;
     const offerPrefix = 'walgreens:';
+    const pendingOffers = new Map();
     return {
       apiVersion,
-      id: 'walgreens',
-      name: 'Walgreens',
-      description: 'Coupons and rebates',
-      defaultBlockedGroups: {
-        Baby: ['baby', 'diaper', 'diapers', 'formula', 'infant', 'toddler'],
-        Pet: ['dog food', 'cat food', 'dog treat', 'cat treat', 'pet treat', 'litter'],
-        Beauty: ['makeup', 'cosmetic', 'mascara', 'foundation', 'hair color'],
-        Supplements: ['vitamin', 'supplement', 'probiotic'],
-        Household: ['laundry', 'detergent', 'dishwasher', 'trash bag', 'air freshener']
-      },
-      matches() { return location.hostname === 'www.walgreens.com' && /^\/offers\/offers\.jsp$/i.test(location.pathname); },
       controlText(element) { return normalize(element?.innerText || element?.textContent); },
       accessibleName(element) { return normalize(element?.getAttribute?.('aria-label') || element?.getAttribute?.('title')); },
       hasOfferControlLabel(element) { const text = this.controlText(element); const name = this.accessibleName(element); return /^(clip|clip coupon|clip rebate|clipped|coupon clipped|rebate clipped|remove coupon|remove rebate|unclip)$/i.test(text) || /^(clip coupon|clip rebate|coupon clipped|rebate clipped|remove coupon|remove rebate)$/i.test(name); },
@@ -32,9 +30,9 @@
       availableFilterActive() { return Boolean(document.querySelector('input#available[type="radio"]:checked')); },
       findLoadMore() { return [...document.querySelectorAll('main button, main a, main [role="button"]')].find(element => isUsableControl(element) && /^(load more|show more|more offers|more coupons)$/i.test(textOf(element))) || null; },
       getItem(id) { return this.discoverItems().find(item => item.id === id) || null; },
-      async perform(id) { const current = this.getItem(id); if (!current || current.status !== ITEM_STATUS.AVAILABLE || !current.control?.isConnected) throw new Error('Walgreens offer is no longer safely actionable'); current.control.scrollIntoView({ behavior: 'smooth', block: 'center' }); current.control.focus({ preventScroll: true }); current.control.click(); },
-      async verify(id, { timeout, signal }) { return Boolean(await waitFor(() => { const card = this.findCardById(id); if (!card) return this.availableFilterActive(); const controls = this.offerControlsWithin(card, { visibleOnly: false }); if (!controls.length) return this.availableFilterActive(); return controls.some(control => this.controlStatus(control) === ITEM_STATUS.CLIPPED); }, { timeout, interval: 180, signal })); },
+      async perform(id) { const current = this.getItem(id); if (!current || current.status !== ITEM_STATUS.AVAILABLE || !current.control?.isConnected) throw new Error('Walgreens offer is no longer safely actionable'); pendingOffers.set(id, { offerCount: document.querySelectorAll('[coupon-id]').length }); current.control.scrollIntoView({ behavior: 'smooth', block: 'center' }); current.control.focus({ preventScroll: true }); current.control.click(); },
+      async verify(id, { timeout, signal }) { return Boolean(await waitFor(() => { const card = this.findCardById(id); if (!card) { const pending = pendingOffers.get(id); const disappearedFromAvailable = pending && this.availableFilterActive() && document.querySelectorAll('[coupon-id]').length < pending.offerCount; if (disappearedFromAvailable) pendingOffers.delete(id); return Boolean(disappearedFromAvailable); } const controls = this.offerControlsWithin(card, { visibleOnly: false }); const clipped = controls.some(control => this.controlStatus(control) === ITEM_STATUS.CLIPPED); if (clipped) pendingOffers.delete(id); return clipped; }, { timeout, interval: 180, signal })); },
       healthCheck(items = this.discoverItems()) { return summarizeHealth(items); }
     };
   });
-})(window);
+})(CouponPilot);

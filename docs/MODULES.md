@@ -1,47 +1,50 @@
 # Coupon Pilot module contract
 
-Coupon Pilot keeps retailer-specific DOM knowledge behind a versioned adapter boundary. The shell owns UI, rules, persistence, throttling, cancellation, retries, activity, debug reports, and run history. Modules own URL matching, offer discovery, action controls, verification, lazy loading, and retailer health.
+API version 3 separates the stable shell from retailer-specific code. A module is one standalone JavaScript file installed through the Coupon Pilot panel. It is not added to `coupon-pilot.user.js`.
 
-## Source and build order
+The shell owns UI, module persistence, rules, throttling, cancellation, retries, activity, diagnostics, and run history. A module owns offer discovery, exact action controls, verification, lazy loading, and retailer health.
 
-```text
-src/coupon-pilot.shell.js
-modules/manifest.mjs
-modules/harris-teeter.js
-modules/walgreens.js
-scripts/build.mjs
-coupon-pilot.user.js       # generated distributable
-```
+## Required file header
 
-`modules/manifest.mjs` is the explicit module allowlist and build order. Add each new module there. Tampermonkey installs only the generated `coupon-pilot.user.js`.
-
-## API version 2
-
-A module file registers one factory before the shell starts:
+Every module starts with a parseable manifest. `@id`, `@name`, `@version`, `@api`, and at least one `@match` are required. Repeat `@match` for additional pages.
 
 ```js
-(function registerRetailerModule(global) {
-  'use strict';
-
-  global.CouponPilotModuleFactories ??= [];
-  global.CouponPilotModuleFactories.push(api => ({
-    apiVersion: api.apiVersion,
-    id: 'retailer-id',
-    name: 'Retailer Name',
-    description: 'Digital coupons',
-    defaultBlockedGroups: {},
-    matches() {},
-    discoverItems() {},
-    perform(id) {},
-    verify(id, { timeout, signal }) {},
-    healthCheck(items) {}
-  }));
-})(window);
+// ==CouponPilotModule==
+// @id           retailer-id
+// @name         Retailer Name
+// @version      1.0.0
+// @api          3
+// @description  Digital coupons
+// @match        https://www.example.com/coupons/*
+// ==/CouponPilotModule==
 ```
 
-Required functions are `matches`, `discoverItems`, `perform`, `verify`, and `healthCheck`. Module IDs must be unique. The shell rejects unsupported API versions, invalid default rule groups, duplicate item IDs, invalid item states, and missing item text or titles.
+IDs use lowercase letters, numbers, and hyphens. Versions use semantic versioning. Match patterns are declarative glob patterns; the shell decides which single module is active for the current URL. If multiple enabled modules match, Coupon Pilot stops and asks the user to disable the extra one.
 
-The frozen API object supplies:
+## Registration
+
+The file must call `CouponPilot.register` exactly once:
+
+```js
+(function registerExampleModule(CouponPilot) {
+  'use strict';
+
+  CouponPilot.register(api => {
+    const { apiVersion, ITEM_STATUS, summarizeHealth } = api;
+    return {
+      apiVersion,
+      discoverItems() {},
+      async perform(id) {},
+      async verify(id, { timeout, signal }) {},
+      healthCheck(items) { return summarizeHealth(items); }
+    };
+  });
+})(CouponPilot);
+```
+
+The factory receives a frozen API and returns an adapter. Required functions are `discoverItems`, `perform`, `verify`, and `healthCheck`. `findLoadMore` is optional. Identity, version, description, and page matching come from the header rather than executable adapter code.
+
+The frozen API supplies:
 
 - `apiVersion` and `ITEM_STATUS`
 - `normalize`, `textOf`, and `safeCouponIdentity`
@@ -50,7 +53,7 @@ The frozen API object supplies:
 
 ## Discovered item contract
 
-`discoverItems()` returns an array of unique items:
+`discoverItems()` returns unique items:
 
 ```js
 {
@@ -63,13 +66,11 @@ The frozen API object supplies:
 }
 ```
 
-IDs should use retailer-provided offer identifiers. Text hashes are a fallback only. `element` is highlighted and scrolled into view; `control` is the exact element that `perform` may click.
+Use retailer-provided offer identifiers when possible. The shell rejects duplicate IDs, invalid states, and missing text or titles.
 
-## Fail-closed lifecycle
+Rules and quick-exclusion groups are owned by the shell and shared across every retailer module. Modules may optionally add `url`, `productUrl`, or a flat `metadata` object to an item. Rule matching also inspects links, URL path/query names, accessible labels, titles, and image alt text within the coupon card.
 
-Every module must preserve:
-
-`discover -> classify -> act -> verify -> record`
+## Fail-closed requirements
 
 - Match explicit coupon controls; never accept generic **Add**, **Shop**, or page-wide buttons.
 - Require one unambiguous action control per card.
@@ -77,20 +78,16 @@ Every module must preserve:
 - Mark unfamiliar, hidden, disabled, or conflicting controls as `AMBIGUOUS`.
 - Verify a retailer-specific success state. A click alone is never success.
 - Respect the supplied timeout and abort signal.
-- Scope `findLoadMore()` to the coupon experience when implemented.
+- Scope `findLoadMore()` to the coupon experience.
 
-`healthCheck(items)` receives already-validated discovered items. Most modules should return `summarizeHealth(items)`.
+## Development loop
 
-## Debug and privacy
+1. Copy the nearest existing retailer module.
+2. Give it a unique header identity, version, and page match.
+3. Implement only retailer-specific discovery/action behavior.
+4. Add the filename to `modules/manifest.mjs` so repository contract tests include it.
+5. Run `node tests/module-contracts.mjs` and `node tests/static-checks.mjs`.
+6. In Coupon Pilot, browse to the local file. Selecting it again updates the installed copy by `@id`.
+7. Reload the retailer page and test in Dry Run.
 
-The shell's 🐞 button includes module ID, health, item counts, settings, and a limited sample of ambiguous control labels. It excludes account data and custom rule text. Module titles and control labels should contain offer information only.
-
-## Adding a retailer
-
-1. Inspect the live coupon page without clicking offers.
-2. Identify stable card IDs, exact action labels, available/clipped states, and lazy-load behavior.
-3. Add `modules/<retailer>.js` and register it in `modules/manifest.mjs`.
-4. Add the retailer URL to userscript `@match` metadata.
-5. Add module contract checks for matching and control states.
-6. Rebuild, run Dry Run on the live page, and inspect the debug report.
-7. Test live actions only with explicit authorization and bounded `Max` settings.
+Modules are trusted code and execute with the shell's page access. The manifest and contract checks catch compatibility and shape errors; they are not a security sandbox.

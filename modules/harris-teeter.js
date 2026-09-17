@@ -1,22 +1,19 @@
-(function registerHarrisTeeterModule(global) {
+// ==CouponPilotModule==
+// @id           harris-teeter
+// @name         Harris Teeter
+// @version      1.0.0
+// @api          3
+// @description  Digital coupons
+// @match        https://www.harristeeter.com/savings/cl/coupons/*
+// ==/CouponPilotModule==
+
+(function registerHarrisTeeterModule(CouponPilot) {
   'use strict';
 
-  global.CouponPilotModuleFactories ??= [];
-  global.CouponPilotModuleFactories.push(api => {
+  CouponPilot.register(api => {
     const { apiVersion, ITEM_STATUS, normalize, textOf, visible, isUsableControl, hash, waitFor, safeCouponIdentity, summarizeHealth } = api;
     return {
       apiVersion,
-      id: 'harris-teeter',
-      name: 'Harris Teeter',
-      description: 'Digital coupons',
-      defaultBlockedGroups: {
-        Baby: ['baby', 'diaper', 'diapers', 'formula', 'infant', 'toddler'],
-        Pet: ['dog food', 'cat food', 'dog treat', 'cat treat', 'pet treat', 'litter'],
-        Beauty: ['makeup', 'cosmetic', 'mascara', 'foundation', 'hair color'],
-        Supplements: ['vitamin', 'supplement', 'probiotic'],
-        Household: ['laundry', 'detergent', 'dishwasher', 'trash bag', 'air freshener']
-      },
-      matches() { return location.hostname === 'www.harristeeter.com' && /\/coupons(?:\/|$)/i.test(location.pathname); },
       isCouponControl(element) { if (!visible(element)) return false; const label = `${textOf(element)} ${normalize(element.getAttribute('aria-label'))}`; return /\bclip\b/i.test(label) || /\bclipped\b/i.test(label) || /\bunclip\b/i.test(label); },
       controlStatus(element) { if (!visible(element)) return ITEM_STATUS.AMBIGUOUS; const visibleText = normalize(element.innerText || element.textContent); const accessibleName = normalize(element.getAttribute('aria-label') || element.getAttribute('title')); const label = `${visibleText} ${accessibleName}`; if (/\bclipped\b|\bunclip\b|\bremove coupon\b/i.test(label)) return ITEM_STATUS.CLIPPED; const explicitClip = /^clip$/i.test(visibleText) || /^clip(?:\s+for\s+coupon:|\s+coupon\b|$)/i.test(accessibleName); return explicitClip && isUsableControl(element) ? ITEM_STATUS.AVAILABLE : ITEM_STATUS.AMBIGUOUS; },
       couponControlsWithin(element) { return [...element.querySelectorAll('button, a, [role="button"]')].filter(control => this.isCouponControl(control)); },
@@ -30,4 +27,4 @@
       healthCheck(items = this.discoverItems()) { return summarizeHealth(items); }
     };
   });
-})(window);
+})(CouponPilot);
