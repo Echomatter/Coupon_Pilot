@@ -1,8 +1,8 @@
 # Install Coupon Pilot
 
-Coupon Pilot is developed as modular JavaScript but distributed as **one Tampermonkey userscript**. You do not install the retailer modules separately.
+Coupon Pilot now installs in two pieces: one stable base userscript and whichever local retailer modules you choose.
 
-## Build
+## 1. Build and install the base
 
 From the repository root:
 
@@ -10,33 +10,30 @@ From the repository root:
 node scripts/build.mjs
 ```
 
-This combines `src/coupon-pilot.shell.js` and `modules/harris-teeter.js` into `coupon-pilot.user.js`.
+Copy the complete contents of `coupon-pilot.user.js` into the existing Coupon Pilot entry in Tampermonkey and save it. The base uses `@match *://*/*` so independently installed modules can support future retailer sites. It stays hidden on pages with no matching module.
 
-The root userscript is generated output. Edit the source files, not the generated file.
+## 2. Install a local module
 
-## Install in Tampermonkey
+1. Open any normal web page.
+2. Open the Tampermonkey extension menu.
+3. Under Coupon Pilot, choose **Coupon Pilot: Manage modules**.
+4. In the panel, click **Browse for local module…**.
+5. Select one of these files:
+   - `modules/harris-teeter.js`
+   - `modules/lowes-foods.js`
+   - `modules/walgreens.js`
+6. Check the displayed module name and version, then approve the trusted-code warning.
+7. Open or reload the retailer coupon page.
 
-Because this repository is private, manual installation is the reliable path:
+You can also choose **Coupon Pilot: Install local module…** directly from the Tampermonkey script menu.
 
-1. Build the userscript.
-2. Open `coupon-pilot.user.js`.
-3. Copy the complete file.
-4. In Tampermonkey, create a new script or open the existing Coupon Pilot script.
-5. Replace its contents and save.
-6. Confirm Coupon Pilot is enabled.
-7. Reload the Harris Teeter coupon page.
+## 3. Verify safely
 
-Keep **Dry run** enabled after installation or a retailer-site change. Configure exclusions and keyword rules, run the preview, inspect the classifications, then disable Dry Run for a live clip run.
+Keep **Dry run** enabled, run the preview, and inspect its classifications before live clipping. The module manager can disable or remove a module without changing the base script. Removing a module keeps its Coupon Pilot rules and run history so reinstalling it restores the configuration.
 
 ## Updating
 
-After changing the shell or a module:
+- **Base update:** rebuild and replace `coupon-pilot.user.js`. Installed modules remain in Tampermonkey storage.
+- **Module update:** browse to the changed `.js` module again. Matching `@id` values are updated in place.
 
-```bash
-node scripts/build.mjs
-node tests/static-checks.mjs
-```
-
-Then replace the installed Tampermonkey script with the rebuilt `coupon-pilot.user.js`.
-
-Coupon Pilot has no backend. Preferences and run settings are stored in Tampermonkey storage for the browser profile where it is installed.
+The panel records a SHA-256 digest with each installed source and includes module metadata—never source code—in copied debug reports.
